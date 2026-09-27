@@ -1,0 +1,367 @@
+{
+  "name": "Route incoming invoices from an IMAP mailbox to approvers with reminders and escalation",
+  "nodes": [
+    {
+      "id": "a8f56869-9d45-43d4-a618-e5af6de033a8",
+      "name": "Note -400/-700",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        -700
+      ],
+      "parameters": {
+        "content": "## Route incoming invoices to approvers\n\nReads invoices from one central mailbox, extracts invoice number, vendor, amount and cost center, resolves the approver by cost center (an unmapped cost center goes to the fallback approver), and flags uncertain values for review instead of passing them on.\n\nEvery invoice mail of a trigger run is dispatched to the \"Process one incoming invoice\" sub-workflow — one execution per invoice, without waiting for it. Approval, reminder, escalation and review then run per invoice with that invoice's data (see that workflow). The router itself never triggers a payment.\n\nGeneric example, no client data. Replace every YOUR_* placeholder before use.",
+        "width": 520,
+        "height": 300,
+        "color": 4
+      }
+    },
+    {
+      "id": "118f59d4-bcd6-4451-affd-ddeced9a1749",
+      "name": "Note -60/-360",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -360
+      ],
+      "parameters": {
+        "content": "### 1. Invoice intake (IMAP trigger)\nOne central mailbox for all incoming invoices. Mark as read so each run only picks up new (unread) mail. A run can pick up several mails at once — every one of them is dispatched separately.",
+        "width": 300,
+        "height": 200
+      }
+    },
+    {
+      "id": "b81125d6-eb45-4ebb-b937-f7165313f00f",
+      "name": "Note 280/-360",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        280,
+        -360
+      ],
+      "parameters": {
+        "content": "### 2. Invoice routing config (Set node)\nApprover per cost center, fallback approver, accounting review inbox, sender address and the reminder/escalation day counts. Every value needed downstream is copied into each invoice item (the cost-center map is resolved to the approver first); the two approval timeouts in the sub-workflow read their day counts from here.",
+        "width": 240,
+        "height": 200
+      }
+    },
+    {
+      "id": "b37d9b5f-5b53-4abc-979c-344406905927",
+      "name": "Note 560/-360",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        560,
+        -360
+      ],
+      "parameters": {
+        "content": "### 3. Extraction + duplicate check (Code node)\nParses invoice number, amount and cost center from the subject and email text with simple patterns; the vendor is the domain of the sender's email address. Resolves the approver by cost center: an unmapped cost center goes to the fallback approver (flagged \"no approver\" only if no fallback is configured). A missing invoice number, amount or cost center is flagged for review — never guessed into the approval chain. The duplicate check only compares invoice numbers within one run; it does not catch an invoice re-sent later.",
+        "width": 380,
+        "height": 200
+      }
+    },
+    {
+      "id": "6b8e3a5d-2c4f-49b7-9e1a-3d7c5b8e1f64",
+      "name": "Note 980/-360",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        980,
+        -360
+      ],
+      "parameters": {
+        "content": "### 4. Dispatch per invoice (HTTP request)\nPOSTs each invoice to the \"Process one incoming invoice\" webhook and does not wait for it, so all invoices of a run run in parallel in their own executions. Before first use, set the same webhook path here and in workflow 2b, and activate both workflows.",
+        "width": 340,
+        "height": 200
+      }
+    },
+    {
+      "id": "02bf209f-64a9-428b-890e-725b4d4c0adb",
+      "name": "Note 240/480",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        480
+      ],
+      "parameters": {
+        "content": "### Error path\nThe IMAP trigger and the HTTP dispatch node use \"On Error: Continue (using error output)\" — errors meet in Log Error, which mails the admin. The admin address is set directly in the Alert Admin node, not in the config node. SMTP errors are handled the same way inside the per-invoice sub-workflow. Trigger failures (for example the IMAP connection) never reach an error output: n8n runs the workflow's Error Workflow instead, so register a separate workflow with an Error Trigger under Settings → Error workflow.",
+        "width": 440,
+        "height": 220,
+        "color": 3
+      }
+    },
+    {
+      "id": "9b548875-b408-46ad-ae17-c88f35c70a87",
+      "name": "Invoice Mailbox (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "mailbox": "YOUR_INVOICE_MAILBOX_FOLDER",
+        "postProcessAction": "read",
+        "format": "simple",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "4e765c18-b9ca-47e4-bff7-f4b10f33f0cf",
+      "name": "Invoice Routing Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "approverByCostCenter",
+              "value": "100=YOUR_APPROVER_A@example.com;200=YOUR_APPROVER_B@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "fallbackApprover",
+              "value": "YOUR_FALLBACK_APPROVER@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg2",
+              "name": "accountingInbox",
+              "value": "YOUR_ACCOUNTING@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg3",
+              "name": "senderAddress",
+              "value": "workflow@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg4",
+              "name": "reminderDays",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "cfg5",
+              "name": "escalationDays",
+              "value": 2,
+              "type": "number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "732cd374-29d7-4a51-be1d-2e1f30a1190b",
+      "name": "Extract Invoice Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Parse invoice fields from the email text, resolve the approver by cost\n// center and flag anything uncertain instead of guessing it onward.\nconst items = $input.all();\nconst cfg = items[0].json;\nconst approverRules = Object.fromEntries(\n  String(cfg.approverByCostCenter || '')\n    .split(';')\n    .map((r) => r.split('='))\n    .filter((p) => p.length === 2)\n);\nconst seen = new Set();\nconst out = [];\nfor (const item of items) {\n  const e = item.json;\n  const text = String(e.textPlain || '');\n  const subject = String(e.subject || '');\n  const all = subject + '\\n' + text;\n  const invoiceNumber = (all.match(/(?:rechnungs?\\s*(?:nummer|nr)|invoice\\s*(?:number|no))\\s*[:#]?\\s*([A-Za-z0-9-]{3,})/i) || [])[1] || '';\n  const amount = (all.match(/(\\d{1,3}(?:[.,]\\d{3})*(?:[.,]\\d{2}))\\s*(?:EUR|€|Euro)/i) || [])[1] || '';\n  const costCenter = (all.match(/(?:kostenstelle|cost\\s*center|cc)\\s*[:#]?\\s*(\\d{2,5})/i) || [])[1] || '';\n  const from = String(e.from || '');\n  const emailMatch = from.match(/<([^>]+)>/);\n  const senderEmail = String(emailMatch ? emailMatch[1] : from).trim().toLowerCase();\n  const vendor = senderEmail.split('@')[1] || '';\n  const approver = approverRules[costCenter] || String(cfg.fallbackApprover || '');\n  const isDuplicate = invoiceNumber && seen.has(invoiceNumber);\n  if (invoiceNumber) seen.add(invoiceNumber);\n  const problems = [];\n  if (!invoiceNumber || !amount || !costCenter) problems.push('invoice number, amount or cost center not clearly found');\n  if (isDuplicate) problems.push('invoice number already seen in this run');\n  if (!approver) problems.push('no approver mapped for this cost center');\n  out.push({\n    json: {\n      subject,\n      invoiceNumber,\n      amount,\n      costCenter,\n      senderEmail,\n      vendor,\n      approver,\n      fallbackApprover: cfg.fallbackApprover,\n      senderAddress: cfg.senderAddress,\n      accountingInbox: cfg.accountingInbox,\n      reminderDays: cfg.reminderDays,\n      escalationDays: cfg.escalationDays,\n      needsReview: problems.length > 0,\n      reviewReason: problems.join('; '),\n    },\n  });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "3f6a7c1e-8b2d-4e9a-b1c4-6d5e8f2a9b31",
+      "name": "Loop Over Invoices",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "9c41d2f6-5a7e-4b38-8c19-d0e3b6a7f452",
+      "name": "Dispatch per Invoice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_N8N_HOST/webhook/YOUR_INVOICE_PROCESSOR_WEBHOOK_PATH",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Invoice Processor Header Auth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "0f415d3c-a2ed-4cb9-a5fc-42fc45c9d593",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        320
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "errorSource",
+              "value": "={{ ($json.error && $json.error.node && $json.error.node.name) || 'unknown node' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "errorMessage",
+              "value": "={{ ($json.error && $json.error.message) || JSON.stringify($json).slice(0, 200) }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "71e37411-2dc5-4df5-aaaf-a40e5c882c3d",
+      "name": "Alert Admin on Error",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        480,
+        320
+      ],
+      "parameters": {
+        "fromEmail": "workflow@example.com",
+        "toEmail": "YOUR_ADMIN@example.com",
+        "subject": "Workflow error in invoice routing",
+        "emailFormat": "text",
+        "text": "=A node failed and continued on its error output.\n\nNode: {{ $json.errorSource }}\nMessage: {{ $json.errorMessage }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Invoice Mailbox (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Invoice Routing Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice Routing Config": {
+      "main": [
+        [
+          {
+            "node": "Extract Invoice Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Invoice Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Invoices": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Dispatch per Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch per Invoice": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [
+        [
+          {
+            "node": "Alert Admin on Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Admin on Error": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

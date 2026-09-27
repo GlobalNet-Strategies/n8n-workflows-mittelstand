@@ -1,0 +1,828 @@
+{
+  "name": "Process one incoming invoice: approval, reminder, escalation and review (called by the invoice router)",
+  "nodes": [
+    {
+      "id": "7c2f6a9d-1b4e-48a3-8d5c-2e9b7f4a1c58",
+      "name": "Note -320/-720",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -720
+      ],
+      "parameters": {
+        "content": "## Process one incoming invoice\n\nCalled once per invoice by workflow 2 (invoice router) via webhook and not waited on: every invoice runs in its own execution with its own data. Expects one POST body with the extracted invoice fields. Both this workflow and the router must be active.\n\nCertain data → approval request with Approve/Decline buttons (Send and Wait for Response), on timeout a reminder and a second request, on a second timeout escalation to the fallback approver. Uncertain data → accounting review. Approved invoices end in Log Approval Task, declined ones inform accounting. The workflow never triggers a payment.\n\nRequires n8n 2.30.0 or later (response detection reads data.respondedAt).",
+        "width": 480,
+        "height": 300,
+        "color": 4
+      }
+    },
+    {
+      "id": "35ca4af7-91fc-47b4-b019-bbc4a2e915d2",
+      "name": "Note 200/-700",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -700
+      ],
+      "parameters": {
+        "content": "### 1. Approval with real response\n\"Send for Approval\" and \"Wait for Approval Again\" use the Send and Wait for Response operation with Approve/Decline buttons; their timeouts read the reminder and escalation day counts from the invoice item. Because each invoice runs in its own execution, several invoices wait independently of each other.\n\nA response replaces the item data with { data: { approved, respondedAt } } — so \"Responded?\" checks whether data.respondedAt exists (string, exists). Requires n8n 2.30.0 or later: older versions return no respondedAt, so every response would be routed like a timeout. On timeout the item passes through unchanged (no data field), which routes into reminder and second request. A second timeout escalates to the fallback approver. Approved invoices end in Log Approval Task, declined ones inform accounting.",
+        "width": 560,
+        "height": 280
+      }
+    },
+    {
+      "id": "7ad51d14-d47b-4905-8c13-c8b46eda9987",
+      "name": "Note 800/-680",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        -680
+      ],
+      "parameters": {
+        "content": "### 2. Review path\nAccounting gets the flagged invoice with the reason. Rejections also land in the accounting inbox. The decision log is the Log Approval Task / Log Escalation output — connect it to your archive or DMS in production.",
+        "width": 420,
+        "height": 240
+      }
+    },
+    {
+      "id": "5f9d3b7a-8e2c-4d16-9b4f-6a1e8c3d7b92",
+      "name": "Note 880/580",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        880,
+        580
+      ],
+      "parameters": {
+        "content": "### Error path\nAll SMTP nodes use \"On Error: Continue (using error output)\" — except Alert Admin on Error, which continues on its regular output. Errors meet in Log Error, which mails the admin. The admin address is set directly in the Alert Admin node, not in a config node. Trigger failures never reach an error output: n8n runs the workflow's Error Workflow instead — register a separate workflow with an Error Trigger under Settings → Error workflow. Requests with a missing or wrong auth header are rejected by the webhook itself (HTTP 403) before an execution starts.",
+        "width": 460,
+        "height": 220,
+        "color": 3
+      }
+    },
+    {
+      "id": "2d9b4f7e-6c3a-4d58-b0e2-8f1a5c9d4e73",
+      "name": "Invoice Received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b7e2c4a9-5d3f-4e18-8a6c-9f0d2b5e7c41",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "YOUR_INVOICE_PROCESSOR_WEBHOOK_PATH",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Invoice Processor Header Auth"
+        }
+      }
+    },
+    {
+      "id": "c5a8d1f2-6b3e-4c97-9d24-8e1b7a3f5d62",
+      "name": "Invoice Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        110,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// The webhook trigger wraps the posted invoice in .body - flatten it\n// so later nodes (and the wait limits) read the invoice fields directly.\nconst item = $input.first().json;\nreturn [{ json: item.body || item }];"
+      }
+    },
+    {
+      "id": "7a3936c8-9a05-4c83-a51d-d3b53bc8edd9",
+      "name": "Data Certain?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0be960b1",
+              "leftValue": "={{ $json.needsReview }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "c7663919-d29c-4355-ba0d-50fe48265cbf",
+      "name": "Send for Approval",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        440,
+        -140
+      ],
+      "parameters": {
+        "resource": "email",
+        "operation": "sendAndWait",
+        "fromEmail": "={{ $('Invoice Data').first().json.senderAddress }}",
+        "toEmail": "={{ $('Invoice Data').first().json.approver }}",
+        "subject": "=Approval needed: invoice {{ $('Invoice Data').first().json.invoiceNumber }} from {{ $('Invoice Data').first().json.vendor }}",
+        "message": "=Please approve or decline the following invoice.\n\nInvoice number: {{ $('Invoice Data').first().json.invoiceNumber }}\nVendor: {{ $('Invoice Data').first().json.vendor }} ({{ $('Invoice Data').first().json.senderEmail }})\nAmount: {{ $('Invoice Data').first().json.amount }} EUR\nCost center: {{ $('Invoice Data').first().json.costCenter }}\n\nThe original email stays in the invoice mailbox; attach or link it from your DMS as your process requires.",
+        "responseType": "approval",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "approveLabel": "Approve",
+            "disapproveLabel": "Decline"
+          }
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": "={{ $('Invoice Data').first().json.reminderDays }}",
+              "resumeUnit": "days"
+            }
+          },
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "e7a9f349-c0d6-450d-9582-f22437dc658b",
+      "name": "Responded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        -140
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "923cc83a",
+              "leftValue": "={{ $json.data.respondedAt }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "08daa0ca-15b7-470b-9be6-e36c809b0887",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -280
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "748e579e",
+              "leftValue": "={{ $json.data.approved }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "57e51c59-329f-4dfd-9ebc-90e9bec7a867",
+      "name": "Log Approval Task",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        -280
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "status",
+              "value": "approved",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "invoiceNumber",
+              "value": "={{ $('Invoice Data').first().json.invoiceNumber }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg2",
+              "name": "approver",
+              "value": "={{ $('Invoice Data').first().json.approver }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg3",
+              "name": "respondedAt",
+              "value": "={{ $json.data.respondedAt }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "75744016-1b63-435e-b1db-12a93ea80a1d",
+      "name": "Notify Accounting: Rejected",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        -140
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Invoice Data').first().json.senderAddress }}",
+        "toEmail": "={{ $('Invoice Data').first().json.accountingInbox }}",
+        "subject": "=Invoice declined: {{ $('Invoice Data').first().json.invoiceNumber }}",
+        "emailFormat": "text",
+        "text": "=The approver declined invoice {{ $('Invoice Data').first().json.invoiceNumber }} from {{ $('Invoice Data').first().json.vendor }} ({{ $('Invoice Data').first().json.amount }} EUR).\n\nDeclined at: {{ $json.data.respondedAt }}\nThe original email stays in the invoice mailbox.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "720232fd-ca3f-4789-84da-7c2fb6eb105d",
+      "name": "Send Reminder",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Invoice Data').first().json.senderAddress }}",
+        "toEmail": "={{ $('Invoice Data').first().json.approver }}",
+        "subject": "=Reminder: invoice {{ $('Invoice Data').first().json.invoiceNumber }} still awaiting your response",
+        "emailFormat": "text",
+        "text": "=No response recorded yet for invoice {{ $('Invoice Data').first().json.invoiceNumber }} ({{ $('Invoice Data').first().json.amount }} EUR, cost center {{ $('Invoice Data').first().json.costCenter }}). A second approval request with new buttons follows.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "694c1fab-bf68-4386-bfbe-61b890698746",
+      "name": "Wait for Approval Again",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "resource": "email",
+        "operation": "sendAndWait",
+        "fromEmail": "={{ $('Invoice Data').first().json.senderAddress }}",
+        "toEmail": "={{ $('Invoice Data').first().json.approver }}",
+        "subject": "=Second request: invoice {{ $('Invoice Data').first().json.invoiceNumber }} awaiting approval",
+        "message": "=Please approve or decline the following invoice. Without a response this escalates to the fallback approver.\n\nInvoice number: {{ $('Invoice Data').first().json.invoiceNumber }}\nVendor: {{ $('Invoice Data').first().json.vendor }} ({{ $('Invoice Data').first().json.senderEmail }})\nAmount: {{ $('Invoice Data').first().json.amount }} EUR\nCost center: {{ $('Invoice Data').first().json.costCenter }}",
+        "responseType": "approval",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "approveLabel": "Approve",
+            "disapproveLabel": "Decline"
+          }
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": "={{ $('Invoice Data').first().json.escalationDays }}",
+              "resumeUnit": "days"
+            }
+          },
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "1aa8c51b-4cc7-467b-ad77-7efea34c2189",
+      "name": "Responded After Reminder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2c5096ea",
+              "leftValue": "={{ $json.data.respondedAt }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "5fbd3c79-50ca-42cd-b756-48d08dba05b0",
+      "name": "Approved After Reminder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        -140
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9a339953",
+              "leftValue": "={{ $json.data.approved }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "0a41bf5b-746b-4d4c-955b-f256b741c58b",
+      "name": "Escalate to Fallback Approver",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1540,
+        140
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Invoice Data').first().json.senderAddress }}",
+        "toEmail": "={{ $('Invoice Data').first().json.fallbackApprover }}",
+        "subject": "=Escalation: invoice {{ $('Invoice Data').first().json.invoiceNumber }} unapproved",
+        "emailFormat": "text",
+        "text": "=Invoice {{ $('Invoice Data').first().json.invoiceNumber }} from {{ $('Invoice Data').first().json.vendor }} ({{ $('Invoice Data').first().json.amount }} EUR) was not approved after reminder and second request. Please take over the decision.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "4d3ce516-f3d1-448d-9d3d-08d73d6f4edd",
+      "name": "Log Escalation",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1760,
+        140
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "status",
+              "value": "escalated_to_fallback",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "invoiceNumber",
+              "value": "={{ $('Invoice Data').first().json.invoiceNumber }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg2",
+              "name": "escalatedTo",
+              "value": "={{ $('Invoice Data').first().json.fallbackApprover }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "05221eae-fe62-4052-b305-0d24504b3920",
+      "name": "Flag for Review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        140
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "status",
+              "value": "needs_review",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "reason",
+              "value": "={{ $json.reviewReason }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "794fe019-352b-47f3-b669-22d4bc2558b8",
+      "name": "Notify Accounting Review",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        660,
+        140
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Invoice Data').first().json.senderAddress }}",
+        "toEmail": "={{ $('Invoice Data').first().json.accountingInbox }}",
+        "subject": "=Invoice needs manual review: {{ $('Invoice Data').first().json.subject }}",
+        "emailFormat": "text",
+        "text": "=This invoice was not routed to an approver.\n\nReason: {{ $('Invoice Data').first().json.reviewReason }}\nInvoice number: {{ $('Invoice Data').first().json.invoiceNumber || 'not found' }}\nAmount: {{ $('Invoice Data').first().json.amount || 'not found' }}\nCost center: {{ $('Invoice Data').first().json.costCenter || 'not found' }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "4a1c8e5b-9d2f-4b36-a7c8-1e5f3b9d2a46",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        880,
+        420
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "errorSource",
+              "value": "={{ ($json.error && $json.error.node && $json.error.node.name) || 'unknown node' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "errorMessage",
+              "value": "={{ ($json.error && $json.error.message) || JSON.stringify($json).slice(0, 200) }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8e5b2d9c-3f6a-4c17-b4e8-9a2d6c1f5b83",
+      "name": "Alert Admin on Error",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        420
+      ],
+      "parameters": {
+        "fromEmail": "workflow@example.com",
+        "toEmail": "YOUR_ADMIN@example.com",
+        "subject": "Workflow error in invoice routing",
+        "emailFormat": "text",
+        "text": "=A node failed and continued on its error output.\n\nNode: {{ $json.errorSource }}\nMessage: {{ $json.errorMessage }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Invoice Received": {
+      "main": [
+        [
+          {
+            "node": "Invoice Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice Data": {
+      "main": [
+        [
+          {
+            "node": "Data Certain?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Certain?": {
+      "main": [
+        [
+          {
+            "node": "Send for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Flag for Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send for Approval": {
+      "main": [
+        [
+          {
+            "node": "Responded?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responded?": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Log Approval Task",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Accounting: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Accounting: Rejected": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder": {
+      "main": [
+        [
+          {
+            "node": "Wait for Approval Again",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Approval Again": {
+      "main": [
+        [
+          {
+            "node": "Responded After Reminder?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responded After Reminder?": {
+      "main": [
+        [
+          {
+            "node": "Approved After Reminder?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate to Fallback Approver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved After Reminder?": {
+      "main": [
+        [
+          {
+            "node": "Log Approval Task",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Accounting: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate to Fallback Approver": {
+      "main": [
+        [
+          {
+            "node": "Log Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flag for Review": {
+      "main": [
+        [
+          {
+            "node": "Notify Accounting Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Accounting Review": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [
+        [
+          {
+            "node": "Alert Admin on Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Admin on Error": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

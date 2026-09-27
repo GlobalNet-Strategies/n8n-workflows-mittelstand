@@ -1,0 +1,567 @@
+{
+  "name": "Create onboarding tasks from a Google Sheets hire list with due dates based on start date",
+  "nodes": [
+    {
+      "id": "5254df03-dbc7-4eb1-b29d-8bc20c4c6daf",
+      "name": "Note -380/-360",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -380,
+        -360
+      ],
+      "parameters": {
+        "content": "## Create onboarding tasks from a hire list\n\nRuns once each morning and reads a shared Google Sheet that HR maintains. Only rows marked approved with a start date become tasks.\n\nFor each hire the workflow builds tasks for management, department, IT and equipment, each with a due date derived from the start date and a named owner. Only tasks whose due date is TODAY are sent (date computed in Europe/Berlin), so no task repeats daily. Owners get one email per task; incomplete rows go back to HR.\n\nIf the start date moves, the task is simply sent on the new due date — nothing ever fires on the old one. Generic example, no client data.",
+        "width": 480,
+        "height": 660,
+        "color": 4
+      }
+    },
+    {
+      "id": "b76882da-6ee8-4fd6-86de-6d4ec31fdae8",
+      "name": "Note -40/-220",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -220
+      ],
+      "parameters": {
+        "content": "### 1. Daily trigger\nOne run each morning. Keep it small and idempotent: re-running only re-derives what the sheet says.",
+        "width": 420,
+        "height": 140
+      }
+    },
+    {
+      "id": "f88936f1-2d3f-4331-b86f-66ee3fb49848",
+      "name": "Note 200/-220",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -220
+      ],
+      "parameters": {
+        "content": "### 2. Hire list (Google Sheets)\nExpects columns: name, start_date (YYYY-MM-DD), department, status. Sheets replaces the item data, so the Set node after it carries both the row and the config values forward.",
+        "width": 440,
+        "height": 140
+      }
+    },
+    {
+      "id": "3745c61f-42b3-4a5e-8c9b-1728276aa384",
+      "name": "Note 460/-220",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        460,
+        -220
+      ],
+      "parameters": {
+        "content": "### 3. Onboarding config + task builder (Set + Code)\nOwners per team and the day offsets live in the Set node. The Code node emits one item per task that is due today (today computed in Europe/Berlin): team, owner, due date (start date minus offset), hire name and a short description. Config values are copied into each output item so later nodes never fall back to placeholders. An offset of 0 skips that team.",
+        "width": 480,
+        "height": 180
+      }
+    },
+    {
+      "id": "3d11129e-8012-4230-8cb3-422ae9ea87d5",
+      "name": "Note 980/-220",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        980,
+        -220
+      ],
+      "parameters": {
+        "content": "### 4. Notify owners\nOne email per task, addressed to the mapped owner, subject carries hire and due date. Values come straight from the task item.",
+        "width": 420,
+        "height": 140
+      }
+    },
+    {
+      "id": "39d57fa9-c1af-4625-b34f-6baf78c9df76",
+      "name": "Note 720/260",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        720,
+        260
+      ],
+      "parameters": {
+        "content": "### 5. HR review path\nApproved rows that are incomplete (missing start date or name) are collected into one email to the HR inbox (hrInbox, not an owner address). This email repeats every morning until the row is fixed. The log node after the owner emails reads its values from the Build Onboarding Tasks node, because Send Email replaces the item data.",
+        "width": 480,
+        "height": 200
+      }
+    },
+    {
+      "id": "969aafe1-9e92-45f3-baa5-5030555bae0f",
+      "name": "Note 1400/40",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        40
+      ],
+      "parameters": {
+        "content": "### Error path\nSheets and SMTP nodes use \"On Error: Continue (using error output)\" — except Alert Admin on Error, which continues on its regular output. Errors meet in Log Error, which mails the admin. The admin address is set directly in the Alert Admin node — on purpose, because when the Sheets read fails before the config node ran, its values are not reachable. In addition, a separate workflow with an Error Trigger can be registered under this workflow's Settings → Error workflow (a per-workflow setting).",
+        "width": 440,
+        "height": 240,
+        "color": 3
+      }
+    },
+    {
+      "id": "3e2c46ab-8aa9-4479-98cd-58f1510b9698",
+      "name": "Daily Morning Run",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4fa8e96f-b352-4e9d-9e2e-c3995184d9a0",
+      "name": "Get Approved Hires",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_HIRE_LIST_DOCUMENT_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "YOUR_SHEET_NAME",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "b8d08e6b-8141-4b72-b241-1bffc7056a74",
+      "name": "Onboarding Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "ownerByTeam",
+              "value": "management=YOUR_MGMT_OWNER@example.com;department=YOUR_DEPT_OWNER@example.com;it=YOUR_IT_OWNER@example.com;equipment=YOUR_EQUIPMENT_OWNER@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "hrInbox",
+              "value": "YOUR_HR@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg2",
+              "name": "senderAddress",
+              "value": "workflow@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg3",
+              "name": "mgmtDaysBefore",
+              "value": 10,
+              "type": "number"
+            },
+            {
+              "id": "cfg4",
+              "name": "deptDaysBefore",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "cfg5",
+              "name": "itDaysBefore",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "cfg6",
+              "name": "equipmentDaysBefore",
+              "value": 2,
+              "type": "number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a5a2c9f8-b4f0-4cec-95b7-8971b7b0e07b",
+      "name": "Build Onboarding Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One item per onboarding task that is due TODAY (Europe/Berlin).\n// Due dates derive from the start date, so a moved start date simply\n// moves the day the task is sent.\nconst cfg = $input.first().json;\nconst today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());\nconst ownerRules = Object.fromEntries(\n  String(cfg.ownerByTeam || '')\n    .split(';')\n    .map((r) => r.split('='))\n    .filter((p) => p.length === 2)\n);\nconst offsets = [\n  ['management', cfg.mgmtDaysBefore, 'Prepare workstation access and intro plan'],\n  ['department', cfg.deptDaysBefore, 'Inform the team and assign a buddy'],\n  ['it', cfg.itDaysBefore, 'Create accounts and hardware requirements'],\n  ['equipment', cfg.equipmentDaysBefore, 'Order equipment and work clothing'],\n];\nconst tasks = [];\nconst reviewRows = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  const name = String(r.name || '').trim();\n  const startDate = String(r.start_date || '').trim();\n  const approved = String(r.status || '').toLowerCase() === 'approved';\n  if (!approved) continue;\n  if (!name || !/^\\d{4}-\\d{2}-\\d{2}$/.test(startDate)) {\n    reviewRows.push({ name: name || '(no name)', start_date: startDate || '(missing)', department: r.department || '' });\n    continue;\n  }\n  const start = new Date(startDate + 'T00:00:00Z');\n  for (const [team, daysBeforeRaw, description] of offsets) {\n    const daysBefore = Number(daysBeforeRaw == null ? 0 : daysBeforeRaw);\n    if (!daysBefore) continue;\n    const due = new Date(start.getTime() - daysBefore * 86400000).toISOString().slice(0, 10);\n    if (due !== today) continue;\n    tasks.push({\n      json: {\n        hireName: name,\n        department: String(r.department || ''),\n        startDate,\n        team,\n        description,\n        dueDate: due,\n        ownerEmail: ownerRules[team] || String(cfg.hrInbox || ''),\n        senderAddress: cfg.senderAddress,\n        needsReview: false,\n        reviewReason: '',\n        reviewRows: [],\n      },\n    });\n  }\n}\nif (reviewRows.length) {\n  tasks.push({\n    json: {\n      needsReview: true,\n      reviewReason: 'approved rows with missing name or start date',\n      reviewRows,\n      hireName: '',\n      startDate: '',\n      team: 'hr',\n      description: '',\n      dueDate: '',\n      ownerEmail: String(cfg.hrInbox || ''),\n      hrInbox: String(cfg.hrInbox || ''),\n      senderAddress: cfg.senderAddress,\n    },\n  });\n}\nreturn tasks;"
+      }
+    },
+    {
+      "id": "8307a8e0-3ba3-4731-8116-1dd1d5b641d5",
+      "name": "Ready to Send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3f7ab8d3",
+              "leftValue": "={{ $json.needsReview }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "43870b46-f189-4a1c-ad92-6caacc4597a4",
+      "name": "Notify Task Owner",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $json.senderAddress }}",
+        "toEmail": "={{ $json.ownerEmail }}",
+        "subject": "=Onboarding task for {{ $json.hireName }} ({{ $json.team }}) due {{ $json.dueDate }}",
+        "emailFormat": "text",
+        "text": "=New hire: {{ $json.hireName }}\nStart date: {{ $json.startDate }}\nTeam: {{ $json.team }}\nDue date: {{ $json.dueDate }}\n\nTask: {{ $json.description }}\n\nIf the start date moves, the task will be sent on the new due date.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "6c353b8a-20bf-4a90-ae8c-03f973c32a73",
+      "name": "Log Onboarding Tasks",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "status",
+              "value": "task_sent",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "hireName",
+              "value": "={{ $('Build Onboarding Tasks').item.json.hireName }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg2",
+              "name": "team",
+              "value": "={{ $('Build Onboarding Tasks').item.json.team }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg3",
+              "name": "dueDate",
+              "value": "={{ $('Build Onboarding Tasks').item.json.dueDate }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4bee4edb-3c9d-45a2-9479-9a0423cef8a0",
+      "name": "Queue for HR Review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        220
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "status",
+              "value": "needs_review",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "reason",
+              "value": "={{ $json.reviewReason }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a5b6bb70-cb8d-4233-9961-8bf716c66214",
+      "name": "Notify HR",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        220
+      ],
+      "parameters": {
+        "fromEmail": "={{ $json.senderAddress }}",
+        "toEmail": "={{ $json.hrInbox }}",
+        "subject": "=Approved hires with incomplete data",
+        "emailFormat": "text",
+        "text": "=These approved rows could not be scheduled:\n\n{{ JSON.stringify($json.reviewRows, null, 2) }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "791ed592-96ed-4a12-b0ec-3f570fdd7d88",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1540,
+        120
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "errorSource",
+              "value": "={{ ($json.error && $json.error.node && $json.error.node.name) || 'unknown node' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "errorMessage",
+              "value": "={{ ($json.error && $json.error.message) || JSON.stringify($json).slice(0, 200) }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cada8a77-cb70-46a2-b531-d6307c5593d4",
+      "name": "Alert Admin on Error",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1760,
+        120
+      ],
+      "parameters": {
+        "fromEmail": "workflow@example.com",
+        "toEmail": "YOUR_ADMIN@example.com",
+        "subject": "Workflow error in onboarding tasks",
+        "emailFormat": "text",
+        "text": "=A node failed and continued on its error output.\n\nNode: {{ $json.errorSource }}\nMessage: {{ $json.errorMessage }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily Morning Run": {
+      "main": [
+        [
+          {
+            "node": "Get Approved Hires",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Approved Hires": {
+      "main": [
+        [
+          {
+            "node": "Onboarding Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Onboarding Config": {
+      "main": [
+        [
+          {
+            "node": "Build Onboarding Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Onboarding Tasks": {
+      "main": [
+        [
+          {
+            "node": "Ready to Send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready to Send?": {
+      "main": [
+        [
+          {
+            "node": "Notify Task Owner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue for HR Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Task Owner": {
+      "main": [
+        [
+          {
+            "node": "Log Onboarding Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Onboarding Tasks": {
+      "main": [
+        []
+      ]
+    },
+    "Queue for HR Review": {
+      "main": [
+        [
+          {
+            "node": "Notify HR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify HR": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [
+        [
+          {
+            "node": "Alert Admin on Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Admin on Error": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Berlin"
+  },
+  "pinData": {}
+}

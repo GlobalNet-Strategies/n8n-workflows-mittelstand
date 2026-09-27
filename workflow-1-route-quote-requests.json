@@ -1,0 +1,530 @@
+{
+  "name": "Route quote requests from multiple IMAP mailboxes to HubSpot with duplicate check",
+  "nodes": [
+    {
+      "id": "c49d5b9e-cbec-4faf-86c8-667f8119a711",
+      "name": "Note -380/-320",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -380,
+        -320
+      ],
+      "parameters": {
+        "content": "## Route quote requests to HubSpot\n\nWatches two shared mailboxes (for example the sales and the info inbox). Every new email is normalized, classified by product group and checked for duplicates within the run.\n\nClear requests create or update a HubSpot contact and notify the responsible sales owner. Incomplete, ambiguous or duplicate requests go to a manual review inbox instead of the CRM.\n\nGeneric example, no client data. Replace every YOUR_* placeholder before use.",
+        "width": 460,
+        "height": 640,
+        "color": 4
+      }
+    },
+    {
+      "id": "961b8cef-cfab-4c8c-9482-fa08381218ea",
+      "name": "Note -40/-180",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -180
+      ],
+      "parameters": {
+        "content": "### 1. Intake (two IMAP triggers)\nEach mailbox is its own Email Trigger (IMAP). Whichever mailbox fires starts the run and walks the same path. Point the mailbox parameter of each node at one shared folder.",
+        "width": 420,
+        "height": 160
+      }
+    },
+    {
+      "id": "76a3cda0-73b0-4aa4-87c2-80e2a44d5331",
+      "name": "Note 200/-180",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -180
+      ],
+      "parameters": {
+        "content": "### 2. Routing config (Set node)\nOwner per product group, fallback owner, review inbox and sender address live here. Edit this node, not the Code node. Mailbox folders are set in the two IMAP nodes; the admin alert and its sender address live in the Alert Admin node itself (see error path note).",
+        "width": 420,
+        "height": 160
+      }
+    },
+    {
+      "id": "6881f029-17f0-418c-90c3-b4c86e1d0857",
+      "name": "Note 440/-180",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        -180
+      ],
+      "parameters": {
+        "content": "### 3. Classification + duplicate check (Code node)\nExtracts sender, subject and body preview, derives the product group from keywords and flags: missing sender/subject, unknown product group, no owner mapped, or sender + subject already seen in this run (the IMAP \"simple\" format has no top-level Message-ID or attachment names, so the owner email's Attachments line stays empty). The config values are copied into each output item so later nodes never fall back to placeholders.",
+        "width": 460,
+        "height": 240
+      }
+    },
+    {
+      "id": "99937ca8-7e10-446b-b954-d8cbfca203ba",
+      "name": "Note 660/-340",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        660,
+        -340
+      ],
+      "parameters": {
+        "content": "### 4. CRM + owner notification\nUpserts one HubSpot contact keyed by the sender email (create or update — no duplicate contacts). Because HubSpot replaces the item data, the email node reads all values from the Prepare Request Data node, not from $json. HubSpot stands for any CRM with an n8n node; swap the node to match yours.",
+        "width": 480,
+        "height": 300
+      }
+    },
+    {
+      "id": "78412c65-be21-456d-b75a-a97eeabf6fc0",
+      "name": "Note 660/260",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        660,
+        260
+      ],
+      "parameters": {
+        "content": "### 5. Manual review\nEverything the classifier is not sure about lands here with a reason, instead of touching the CRM. The review inbox is the single place a human has to watch.",
+        "width": 440,
+        "height": 180
+      }
+    },
+    {
+      "id": "c8193400-0f81-4622-856b-a01a05922f78",
+      "name": "Note 1100/-180",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -180
+      ],
+      "parameters": {
+        "content": "### Error path\nAll nodes with external dependencies (IMAP, HubSpot, SMTP) use \"On Error: Continue (using error output)\" — except Alert Admin on Error, which continues on its regular output. Their error outputs meet in Log Error, which mails the admin. The admin address is set directly in the Alert Admin node, not in Routing Config. Trigger failures (for example the IMAP connection) never reach an error output: n8n runs the workflow's Error Workflow instead, so register a separate workflow with an Error Trigger under Settings → Error workflow.",
+        "width": 440,
+        "height": 260,
+        "color": 3
+      }
+    },
+    {
+      "id": "6736598a-a514-46c8-8cd9-deec80baed2f",
+      "name": "Sales Mailbox (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "mailbox": "YOUR_SALES_MAILBOX_FOLDER",
+        "postProcessAction": "read",
+        "format": "simple",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c5eb44b9-2805-4cab-ae44-b439bdfab01f",
+      "name": "Info Mailbox (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ],
+      "parameters": {
+        "mailbox": "YOUR_INFO_MAILBOX_FOLDER",
+        "postProcessAction": "read",
+        "format": "simple",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "3f1d78c1-3f65-4870-b1e0-e31dfdb33f52",
+      "name": "Routing Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        110
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "ownerByProductGroup",
+              "value": "products=YOUR_PRODUCTS_OWNER@example.com;service=YOUR_SERVICE_OWNER@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "salesOwnerFallback",
+              "value": "YOUR_SALES_FALLBACK@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg2",
+              "name": "reviewInbox",
+              "value": "YOUR_MAILBOX@example.com",
+              "type": "string"
+            },
+            {
+              "id": "cfg3",
+              "name": "senderAddress",
+              "value": "workflow@example.com",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cfcb7a1b-1364-4500-ad98-98dd815e3b01",
+      "name": "Prepare Request Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        110
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normalize inbound emails, classify the product group and flag anything\n// a human should look at. Config values come from the Routing Config node.\nconst items = $input.all();\nconst cfg = items[0].json;\nconst ownerRules = Object.fromEntries(\n  String(cfg.ownerByProductGroup || '')\n    .split(';')\n    .map((r) => r.split('='))\n    .filter((p) => p.length === 2)\n);\nconst seen = new Set();\nconst out = [];\nfor (const item of items) {\n  const e = item.json;\n  const from = String(e.from || '');\n  const emailMatch = from.match(/<([^>]+)>/);\n  const fromEmail = String(emailMatch ? emailMatch[1] : from).trim().toLowerCase();\n  const fromName = from.replace(/<[^>]+>/, '').replace(/\"/g, '').trim() || fromEmail;\n  const subject = String(e.subject || '').trim();\n  const text = String(e.textPlain || '').slice(0, 2000);\n  const attachments = (e.attachments || []).map((a) => a.filename || 'attachment');\n  const haystack = (subject + ' ' + text).toLowerCase();\n  const productGroup = /service|support|wartung|wartungsvertrag/.test(haystack)\n    ? 'service'\n    : /produkt|artikel|bestellung|product|order/.test(haystack)\n      ? 'products'\n      : 'other';\n  const ownerEmail = ownerRules[productGroup] || String(cfg.salesOwnerFallback || '');\n  const messageId = String(e.messageId || fromEmail + '|' + subject);\n  const isDuplicate = seen.has(messageId);\n  seen.add(messageId);\n  const problems = [];\n  if (!fromEmail || !subject || productGroup === 'other') problems.push('missing sender or subject, or no product group matched');\n  if (isDuplicate) problems.push('duplicate message id within this run');\n  if (!ownerEmail) problems.push('no owner mapped for this product group');\n  out.push({\n    json: {\n      messageId,\n      fromEmail,\n      fromName,\n      subject,\n      bodyPreview: text.slice(0, 300),\n      attachments,\n      productGroup,\n      ownerEmail,\n      senderAddress: cfg.senderAddress,\n      reviewInbox: cfg.reviewInbox,\n      needsReview: problems.length > 0,\n      reviewReason: problems.join('; '),\n    },\n  });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "952c132e-fe97-4b77-a454-260c8cac8cfe",
+      "name": "Ready for CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        110
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d0dd8f32",
+              "leftValue": "={{ $json.needsReview }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "7a569e38-3d24-48c6-9305-8e78ca69b799",
+      "name": "Create or Update HubSpot Contact",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ],
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $json.fromEmail }}",
+        "additionalFields": {
+          "firstName": "={{ $json.fromName.split(' ')[0] || '' }}",
+          "lastName": "={{ $json.fromName.split(' ').slice(1).join(' ') }}"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "cc04dd4b-b3a3-473f-aa8f-ce60b0320b6c",
+      "name": "Notify Sales Owner",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Prepare Request Data').item.json.senderAddress }}",
+        "toEmail": "={{ $('Prepare Request Data').item.json.ownerEmail }}",
+        "subject": "=New quote request: {{ $('Prepare Request Data').item.json.subject }}",
+        "emailFormat": "text",
+        "text": "=A new request classified as \"{{ $('Prepare Request Data').item.json.productGroup }}\" was routed to you.\n\nFrom: {{ $('Prepare Request Data').item.json.fromName }} <{{ $('Prepare Request Data').item.json.fromEmail }}>\nPreview: {{ $('Prepare Request Data').item.json.bodyPreview }}\nAttachments: {{ $('Prepare Request Data').item.json.attachments.join(', ') }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "23e10016-1160-40ad-8eec-56c4d4d4c429",
+      "name": "Queue for Manual Review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        900,
+        220
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "status",
+              "value": "needs_review",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "reason",
+              "value": "={{ $json.reviewReason }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3b5cf132-a608-4df7-b530-b95d48153911",
+      "name": "Notify Review Inbox",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        220
+      ],
+      "parameters": {
+        "fromEmail": "={{ $('Prepare Request Data').item.json.senderAddress }}",
+        "toEmail": "={{ $('Prepare Request Data').item.json.reviewInbox }}",
+        "subject": "=Request needs manual review: {{ $('Prepare Request Data').item.json.subject }}",
+        "emailFormat": "text",
+        "text": "=This request was not written to the CRM.\n\nReason: {{ $('Prepare Request Data').item.json.reviewReason }}\nFrom: {{ $('Prepare Request Data').item.json.fromName }} <{{ $('Prepare Request Data').item.json.fromEmail }}>\nPreview: {{ $('Prepare Request Data').item.json.bodyPreview }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "1326579a-5492-4405-9245-fb4904c54779",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1340,
+        110
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg0",
+              "name": "errorSource",
+              "value": "={{ ($json.error && $json.error.node && $json.error.node.name) || 'unknown node' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg1",
+              "name": "errorMessage",
+              "value": "={{ ($json.error && $json.error.message) || JSON.stringify($json).slice(0, 200) }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "e6dc4866-f40b-4599-b5f1-cfd13871e649",
+      "name": "Alert Admin on Error",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        110
+      ],
+      "parameters": {
+        "fromEmail": "workflow@example.com",
+        "toEmail": "YOUR_ADMIN@example.com",
+        "subject": "Workflow error in quote request routing",
+        "emailFormat": "text",
+        "text": "=A node failed and continued on its error output.\n\nNode: {{ $json.errorSource }}\nMessage: {{ $json.errorMessage }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Sales Mailbox (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Routing Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Info Mailbox (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Routing Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Routing Config": {
+      "main": [
+        [
+          {
+            "node": "Prepare Request Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Request Data": {
+      "main": [
+        [
+          {
+            "node": "Ready for CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready for CRM?": {
+      "main": [
+        [
+          {
+            "node": "Create or Update HubSpot Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue for Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create or Update HubSpot Contact": {
+      "main": [
+        [
+          {
+            "node": "Notify Sales Owner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Sales Owner": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue for Manual Review": {
+      "main": [
+        [
+          {
+            "node": "Notify Review Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Review Inbox": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [
+        [
+          {
+            "node": "Alert Admin on Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Admin on Error": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
